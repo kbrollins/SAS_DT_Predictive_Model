@@ -1,0 +1,319 @@
+ods noproctitle;
+ods graphics / imagemap=on;
+
+proc means data=SASHELP.HEART chartype mean std min max median n nmiss 
+		vardef=df skewness kurtosis qrange qmethod=os;
+	var AgeCHDdiag AgeAtStart Height Weight Diastolic Systolic MRW Smoking 
+		AgeAtDeath Cholesterol;
+run;
+
+proc univariate data=SASHELP.HEART vardef=df noprint;
+	var AgeCHDdiag AgeAtStart Height Weight Diastolic Systolic MRW Smoking 
+		AgeAtDeath Cholesterol;
+	histogram AgeCHDdiag AgeAtStart Height Weight Diastolic Systolic MRW Smoking 
+		AgeAtDeath Cholesterol / normal(noprint);
+run;
+
+/* Label: Categorical Data Summaries */
+
+
+ods noproctitle;
+
+/*** Analyze categorical variables ***/
+title "Frequencies for Categorical Variables";
+
+proc freq data=SASHELP.HEART;
+	tables Status DeathCause Sex Chol_Status BP_Status Weight_Status 
+		Smoking_Status / plots=(freqplot);
+run;
+
+/* Label: Remove Missing Weight, Smoking, and Cholesterol */
+
+proc sql noprint;
+	create table work.heart_complete as select * from SASHELP.HEART where(Weight 
+		NE .
+                               
+    
+          AND Smoking 
+		NE .
+                                                  
+          AND Cholesterol NE .);
+quit;
+
+/* Label: Create New Feature */
+Data work.heart_plus;
+	set work.heart_complete;
+	if AgeCHDdiag EQ . then cat_AgeCHDdiag=0;
+	else cat_AgeCHDdiag=1;
+run;
+
+
+/* Label: Remove Redundant Variables */
+data work.heart_final (DROP= Weight Height);
+	set work.heart_plus;
+run;
+
+
+/* Label: HEART_ALIVE */
+
+
+proc sql noprint;
+	create table WORK.HEART_ALIVE as select * from WORK.HEART_FINAL where(Status 
+		EQ 'Alive');
+quit;
+
+/* Label: HEART_DEAD */
+
+proc sql noprint;
+	create table WORK.HEART_DEAD as select * from WORK.HEART_FINAL where(Status EQ 
+		'Dead');
+quit;
+
+/* Label: Partition HEART_DEAD to train and test data sets */
+
+data _null_;
+	idMaxLength=length("$partitionDataValue1");
+	idMaxLength=max(idMaxLength, length("$partitionDataValue2"));
+
+	/* Put it in a macro variable for use in the real code */
+	call symput('idLength', idMaxLength);
+run;
+
+proc sql noprint;
+	select count(*) into :count from WORK.HEART_DEAD;
+quit;
+
+data WORK.HEART_DEAD_TRAIN WORK.HEART_DEAD_TEST;
+	set WORK.HEART_DEAD;
+	retain __tmp1-__tmp%trim(&count) __nobs__ __nobs1__ __nobs2__;
+	drop _i_ __seed__ __tmp1-__tmp%trim(&count);
+	drop _n1_ __nobs__ __nobs1__ __nobs2__;
+	array __tmp(*) __tmp1-__tmp%trim(&count);
+
+	if (_n_=1) then
+		do;
+			__seed__=-1;
+			__nobs__=&count;
+
+			do _i_=1 to dim(__tmp);
+				__tmp(_i_)=_i_;
+			end;
+			call ranperm(__seed__, of __tmp(*));
+			__nobs1__=round(0.8*__nobs__);
+			__nobs2__=round(0.2*__nobs__)+__nobs1__;
+		end;
+	_n1_=_n_;
+
+	if (_n1_ <=dim(__tmp)) then
+		do;
+
+			if (__tmp(_n1_) > 0) then
+				do;
+
+					if (__tmp(_n1_) <=__nobs1__) then
+						do;
+							output WORK.HEART_DEAD_TRAIN;
+						end;
+					else if (__tmp(_n1_) <=__nobs2__) then
+						do;
+							output WORK.HEART_DEAD_TEST;
+						end;
+				end;
+		end;
+run;
+
+/* Label: Principal Component Analysis  for HEART_DEAD */
+
+ods noproctitle;
+ods graphics / imagemap=on;
+
+proc princomp data=WORK.HEART_DEAD plots(only)=(scree) 
+		out=work.Princomp_scores_HEART_DEAD;
+	var Diastolic Systolic MRW Smoking Cholesterol cat_AgeCHDdiag;
+run;
+
+/* Label: K-Means Clustering based on PCA */
+
+ods noproctitle;
+
+proc stdize data=WORK.PRINCOMP_SCORES_HEART_DEAD out=Work._std_ method=range;
+	var Prin1 Prin2 Prin3;
+run;
+
+proc fastclus data=Work._std_ maxclusters=2 maxiter=20 drift distance 
+		out=work.Fastclus_scores_PCA outstat=work.Fastclus_stats_PCA 
+		outseed=work.Fastclus_seeds_PCA;
+	where DeathCause='Cancer' | DeathCause='Coronary Heart Disease';
+	var Prin1 Prin2 Prin3;
+run;
+
+proc delete data=Work._std_;
+run;
+
+/* Label: K-Means Clustering with original variables */
+
+
+ods noproctitle;
+
+proc stdize data=WORK.PRINCOMP_SCORES_HEART_DEAD out=Work._std_ method=range;
+	var Diastolic Systolic Smoking cat_AgeCHDdiag;
+run;
+
+proc fastclus data=Work._std_ maxclusters=2 maxiter=20 drift distance 
+		out=work.Fastclus_scores_orig outstat=work.Fastclus_stats_orig 
+		outseed=work.Fastclus_seeds_orig;
+	where DeathCause='Cancer' | DeathCause='Coronary Heart Disease';
+	var Diastolic Systolic Smoking cat_AgeCHDdiag;
+run;
+
+proc delete data=Work._std_;
+run;
+
+/* Label: Cluster and DeathCause Relationship-PCA */
+
+
+ods graphics / reset width=6.4in height=4.8in imagemap;
+
+proc sgplot data=WORK.FASTCLUS_SCORES_PCA;
+	vbar CLUSTER / group=DeathCause groupdisplay=cluster;
+	yaxis grid;
+run;
+
+ods graphics / reset;
+
+/* Label: Cluster and DeathCause Relationship-Orig */
+
+ods graphics / reset width=6.4in height=4.8in imagemap;
+
+proc sgplot data=WORK.FASTCLUS_SCORES_ORIG;
+	vbar CLUSTER / group=DeathCause groupdisplay=cluster;
+	yaxis grid;
+run;
+
+ods graphics / reset;
+
+/* Label: K-Means Clustering-all variables */
+
+ods noproctitle;
+
+proc stdize data=WORK.HEART_DEAD out=Work._std_ method=range;
+	var Diastolic Systolic Smoking AgeAtDeath Cholesterol cat_AgeCHDdiag MRW;
+run;
+
+proc fastclus data=Work._std_ maxclusters=3 maxiter=20 drift distance 
+		out=work.Fastclus_scores_all outstat=work.Fastclus_stats_all 
+		outseed=work.Fastclus_seeds_all;
+	where DeathCause='Cancer' | DeathCause='Coronary Heart Disease' | DeathCause='Cerebral Vascular Disease';
+	var Diastolic Systolic Smoking AgeAtDeath Cholesterol cat_AgeCHDdiag MRW;
+run;
+
+proc delete data=Work._std_;
+run;
+
+/* Label: Creating Life Expectancy Variable */
+data WORK.HEART_DEAD_LIFEXP_TEMP; 
+	set WORK.HEART_DEAD;
+	if AgeCHDdiag NE . then LifeExp=AgeAtDeath-AgeCHDdiag; 
+	else LifeExp=.;
+run;
+
+/* Label: Cluster and Death Cause Relationship */
+
+
+ods graphics / reset width=6.4in height=4.8in imagemap;
+
+proc sgplot data=WORK.FASTCLUS_SCORES_ALL;
+	vbar CLUSTER / group=DeathCause groupdisplay=cluster datalabel;
+	yaxis grid;
+run;
+
+ods graphics / reset;
+
+/* Label: N-Way ANOVA for Significant Variables */ 
+
+ods noproctitle;
+ods graphics / imagemap=on;
+
+proc glm data=WORK.FASTCLUS_SCORES_ALL plots=none;
+	class Diastolic Systolic MRW Smoking AgeAtDeath Cholesterol cat_AgeCHDdiag;
+	model CLUSTER=Diastolic Systolic MRW Smoking AgeAtDeath Cholesterol 
+		cat_AgeCHDdiag / ss1 ss3;
+	lsmeans Diastolic Systolic MRW Smoking AgeAtDeath Cholesterol cat_AgeCHDdiag / 
+		adjust=tukey pdiff=all alpha=0.05 cl;
+quit;
+
+/* Label: Hierarchical Clustering */
+
+ods noproctitle;
+
+proc cluster data=WORK.FASTCLUS_SEEDS_ALL method=ward plots;
+	var Diastolic Systolic Smoking AgeAtDeath Cholesterol cat_AgeCHDdiag MRW;
+run;
+
+/* Label: Filter out records with Null Life Expectancy */
+
+
+proc sql noprint;
+	create table work.heart_dead_lifexp_filter as select * from 
+		WORK.HEART_DEAD_LIFEXP_TEMP where(LifeExp NE .);
+quit;
+
+/* Label: Creating Categories "Short" and "Long" for Life Expectancy */
+data WORK.HEART_DEAD_LIFEXP;
+	set WORK.HEART_DEAD_LIFEXP_FILTER;
+	if LifeExp LT 8.3 then cat_LifeExp= "short"; 
+	else cat_LifeExp= "long";
+run;
+
+/* Label: LifeExp Binary Predictive DT Model v1 */
+proc hpsplit data=WORK.HEART_DEAD_LIFEXP;
+	class cat_LifeExp; 
+	model cat_LifeExp=AgeCHDdiag Diastolic Systolic Smoking Cholesterol MRW; 
+	grow entropy; 
+	prune entropy; 
+	partition fraction(validate=0.2 seed=1234); 
+	Rules file="/home/u62130966/HIM 6655/Week 8/HEART_DT_Rules.txt";
+run;
+
+
+/* Label: LifeExp Binary Predictive DT Model v2 */
+proc hpsplit data=WORK.HEART_DEAD_LIFEXP maxdepth=4;
+	class cat_LifeExp; 
+	model cat_LifeExp=AgeCHDdiag Diastolic Systolic Smoking Cholesterol MRW; 
+	grow entropy; 
+	prune entropy; 
+	partition fraction(validate=0.2 seed=1234);
+	Rules file="/home/u62130966/HIM 6655/Week 8/HEART_DT_Rules.txt";
+run;
+
+
+/* Label: LifeExp Binary Predictive DT Model v3 */
+proc hpsplit data=WORK.HEART_DEAD_LIFEXP maxbranch=2;
+	class cat_LifeExp; 
+	model cat_LifeExp=AgeCHDdiag Diastolic Systolic Smoking Cholesterol MRW; 
+	grow chaid; 
+	prune REDUCEDERROR; 
+	partition fraction(validate=0.2 seed=1234);
+	Rules file="/home/u62130966/HIM 6655/Week 8/HEART_DT_Rules.txt";
+run;
+
+/* Label: LifeExp Binary Predictive DT Model v5 */
+proc hpsplit data=WORK.HEART_DEAD_LIFEXP maxdepth=4;
+	class cat_LifeExp; 
+	model cat_LifeExp=AgeCHDdiag Diastolic Systolic Smoking Cholesterol MRW; 
+	grow CHISQUARE; 
+	prune c45 ; 
+	partition fraction(validate=0.2 seed=1234);
+	Rules file="/home/u62130966/HIM 6655/Week 8/HEART_DT_Rules.txt";
+run;
+
+/* Label: LifeExp Binary Predictive DT Model v4 */
+proc hpsplit data=WORK.HEART_DEAD_LIFEXP maxdepth=4;
+	class cat_LifeExp; 
+	model cat_LifeExp=AgeCHDdiag Diastolic Systolic Smoking Cholesterol MRW; 
+	grow fastchaid; 
+	prune C45; 
+	partition fraction(validate=0.2 seed=1234);
+	Rules file="/home/u62130966/HIM 6655/Week 8/HEART_DT_Rules.txt";
+run;
+
