@@ -1,7 +1,7 @@
 # SAS_DT_Predictive_Model
 Predictive modeling with Decision Trees using various options for growing and pruning
 
-This SAS program creates a predictive decision tree model for binary classification of life expectancy as "short" or "long" using data on age at death, age at CHD diagnosis, diastolic blood pressure, systolic blood pressure, smoking status, cholesterol level, and MRW (metabolic risk weight).
+This SAS program creates a predictive decision tree model for binary classification of life expectancy as "short" or "long" using data on age at death, age at CHD diagnosis, diastolic blood pressure, systolic blood pressure, smoking status, cholesterol level, and MRW (metropolitan relative weight).
 
 The program begins by creating a temporary dataset called WORK.HEART_DEAD_LIFEXP_TEMP from the input dataset WORK.HEART_DEAD. It calculates the life expectancy for each observation by subtracting the age at CHD diagnosis from the age at death, if the age at CHD diagnosis is not missing. If the age at CHD diagnosis is missing, the life expectancy is set to missing. Then, the program creates a filtered dataset called WORK.HEART_DEAD_LIFEXP_FILTER, excluding records with missing life expectancy.
 
